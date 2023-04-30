@@ -6,5 +6,6 @@ The aim of the analysis was to investigate how the Covid-19 pandemic affected in
 
 This project was developed in R.
 Please refer to the R-Markdown at: https://rodrigogarcia92.github.io/covid-effect-on-institutions/
+Also, refer to the Power Point presentation for a brief overview of the project: presentation/Covid effects on institutional performance.pdf
 
 I couldn't upload the "Matricula_01.dbf" file, as it was bigger than 100MB. It can be downloaded in the Minedu ESCALE website: https://escale.minedu.gob.pe/uee/-/document_library_display/GMv7/view/6226837
