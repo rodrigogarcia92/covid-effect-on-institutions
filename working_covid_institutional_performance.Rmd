@@ -1,0 +1,512 @@
+---
+title: "Covid Effects on Institutional Performance"
+output:
+  word_document: default
+  html_notebook: default
+  pdf_document: default
+---
+
+#Introduction:
+
+How did Covid-19 affect institutional performance? A brief view of the education sector in Peru.
+
+This project is a short and public version of an analysis I lead for the Ministry of Education of Peru (Minedu) in 2021, while my team and I designed the 2022 edition of a Results Based Financing (RBF) Mechanism called "Compromisos de Desempeño" (CdD or Performance Commitments).
+
+The public education sector in Peru has the particularity of being divided into more than 220 decentralized institutions called "UGEL" (Unidades de Gestión Educativa Local) with similar functions and responsibilities for supplying public education throughout their individual jurisdictions.  For further information on this topic, please refer to Article 73 of the Law 28044 (http://www.minedu.gob.pe/p/ley_general_de_educacion_28044.pdf). As part of the CdD Program, Minedu assesses various Key Performance Indicators for each UGEL, and the historical results from 2014 to the present day are publicly available on the CdD website (http://www.minedu.gob.pe/cdd/).
+
+The next significant advantage is Peru was very open about their Covid data. The web “Datos Abiertos” (Open Data) allowed us to find every piece of data needed for the project.
+* 2021 Peru population: [https://www.datosabiertos.gob.pe/dataset/población-peru](https://www.datosabiertos.gob.pe/dataset/poblaci%C3%B3n-peru)
+* Covid related deaths: [https://www.datosabiertos.gob.pe/dataset/fallecidos-por-covid-19-ministerio-de-salud-minsa](https://www.datosabiertos.gob.pe/dataset/fallecidos-por-covid-19-ministerio-de-salud-minsa)
+
+Bsed on the results, there was a significant impact of Covid-19 on UGELs performance in Peru in the first wave of 2020, particularly in areas that were hit harder by the pandemic. However, our analysis of the second wave in 2021 suggests that institutions may have adapted to the pandemic, and that there may have been underlying factors contributing to performance reduction.
+
+
+## How to measure Institutional Performance?
+Historical data of CdD results include the mean achievement value or "Valor Logrado" for each indicator in each UGEL or jurisdiction. These results can be analyzed by year and phase. For instance, during phase 1 of the CdD 2020, on January 31st, 2020, Minedu evaluated eight indicators among 223 institutions.
+
+## How to measure the severity of the pandemic in each jurisdiction?
+We decided to use the number of Covid-19 related deaths per 1,000 people in each jurisdiction for every quarter between 2020 and 2021. We believe that this data provides a more accurate representation of the impact of Covid-19 on the country, as Covid-19 infections may have been underreported due to the limited availability of testing, especially during the early stages of the pandemic.
+
+
+# Preparation
+
+```{r message=FALSE, warning=TRUE, include=FALSE}
+library(readxl)
+library(openxlsx)
+library(purrr)
+library(dplyr)
+library(tidyr)
+library(writexl)
+library(data.table)
+library(foreign)
+library(tibble)
+library(ggplot2)
+library(lubridate)
+library(ggthemes)
+```
+
+Working Directory
+```{r}
+f_base <- "F:/Rodrigo/Antiguo Escritorio/Rodrigo/Cursos/Google Data Analytics/Course 8 Capstone/Project"
+
+setwd(f_base)
+
+```
+
+
+##Data about schools in Peru
+
+### Data from the Minedu (Ministerio de Educación)
+Schools in Peru by district and UGEL jurisdiction - 2020
+Cendo Educativo:
+https://escale.minedu.gob.pe/uee/-/document_library_display/GMv7/view/6226837
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#Importing the data from the link as an Excel because there were some character barriers using the DBF format 
+setwd(f_base)
+peru_schools_full_df <- read_excel("padron.xlsx") %>% 
+  as.data.frame()
+head(peru_schools_full_df)
+colnames(peru_schools_full_df)
+```
+
+
+There are some filters I have to apply to clean this data
+* ANEXO: It is higher than 0 if the row corresponds to a different building of the same school
+* D_FORMA: We need only schools and not other types of services, such as daycares
+* NIV_MOD: We need to filter out higher education from this analysis, as this institutions are under regional administration and are not inder the jurisdiction of the UGELs.
+
+I generated a brief summary of the different levels of educations of Peru in the variable level_of_education.
+
+
+```{r}
+#Levels of education
+peru_schools_full_df %>%
+  group_by(NIV_MOD,D_NIV_MOD) %>% 
+  summarise(n = n())
+
+#Data cleaning
+peru_schools <- peru_schools_full_df %>% 
+  mutate(codmod = as.numeric(COD_MOD),
+         codlocal = as.numeric(CODLOCAL),
+         ubigeo = as.numeric(CODGEO),
+         codooii = as.numeric(CODOOII),
+         level_of_education = case_when(
+           NIV_MOD %in% c("A1", "A2", "A3","A4") ~ "Preschool",
+           NIV_MOD == "B0" ~ "Primary school",
+           NIV_MOD == "F0" ~ "Secondary school",
+           NIV_MOD %in% c("D1", "D2") ~ "Alternative school",
+           NIV_MOD %in% c("E0","E1", "E2") ~ "Special needs school",
+           NIV_MOD %in% c("K0","L0", "M0","T0") ~ "Higher education - not universities")) %>% 
+  filter(ANEXO ==0,
+         D_FORMA == "Escolarizada",
+         level_of_education != "Higher education - not universities") %>% 
+  rename(school_name = CEN_EDU,
+         management = D_GESTION,
+         urban_context = DAREAMED,
+         geography = REGION_NAT,
+         latitud = NLAT_IE,
+         longitud = NLONG_IE,
+         elevation_msnm = ALTITUD) %>% 
+  select(codmod,codlocal,ubigeo,codooii,level_of_education,school_name,management,urban_context,geography,latitud,longitud,elevation_msnm)
+
+head(peru_schools)
+```
+
+Now we need to relate each of Peru's 1,874 districts to each of the 223 UGEL jurisdictions. To simplify this process, we will assign only one UGEL (with code "codooii") to each district (with ubigeo code). In cases where a district falls within the jurisdiction of more than one UGEL, we will choose the UGEL with the highest number of schools in that district.
+
+```{r}
+#Number of districts in Peru
+length(unique(peru_schools$ubigeo))
+  
+#Number of UGEL in Peru
+length(unique(peru_schools$codooii))
+
+#Ubigeo - Codooii relation
+ubigeo_codooii <- peru_schools %>% 
+  group_by(codooii,ubigeo) %>% 
+  summarise(n_schools = n())
+write_xlsx(ubigeo_codooii,"ubigeo_codooii.xlsx")
+
+ubigeo_codooii <- ubigeo_codooii %>%
+  group_by(ubigeo) %>%
+  arrange(desc(n_schools)) %>%
+  slice(1) %>%
+  ungroup()
+```
+
+We will use the additional module of the Censo Educativo to collect the number of students enrolled in each school district.
+
+```{r}
+students <- read.dbf("Matricula_01.dbf", as.is = TRUE) %>% 
+  as.data.frame() %>% 
+  mutate(codmod = as.numeric(COD_MOD),
+         codooii = as.numeric(CODOOII),
+         n_students = rowSums(select(., starts_with("D")))) %>% 
+  group_by(codmod, codooii) %>% 
+  summarise(n_students = sum(n_students))
+  
+head(students)
+```
+
+
+Then we can calculate additional variables for each UGEL jurisdiction using the peru_schools dataframe, such as:
+* % rurality
+* Mean elevation
+* Number of schools
+* Number of students
+* sierra (Andes)
+* selva (Rainforest)
+
+I will use these variables in the linear regression models to evaluate whether the performance impact on the UGELs was more closely related to these characteristics rather than to COVID-19.
+
+```{r}
+ugel_vars <- merge(peru_schools,students,by=c("codmod","codooii"), all.x = T) %>%
+  mutate(rural_strudents = ifelse(urban_context =="Rural",n_students,0)) %>% 
+  group_by(codooii) %>% 
+  summarise(n_students = sum(n_students),
+            rurality = sum(rural_strudents)/sum(n_students),
+            mean_elevation_msnm = mean(elevation_msnm),
+            n_schools = n(),
+            prcnt_andes = sum(geography=="SIERRA")/n(),
+            prcnt_selva = sum(geography=="SELVA")/n())
+head(ugel_vars)
+```
+
+
+
+## Data about covid related deaths (ministerio de Salud)
+https://www.datosabiertos.gob.pe/dataset/fallecidos-por-covid-19-ministerio-de-salud-minsa
+I'm going to group covid deaths by quarter and year for simplicity in the analysis.
+
+```{r}
+covid_deaths <- read.csv("fallecidos_covid.csv",sep = ";") %>% 
+  as.data.frame() %>% 
+  mutate(year = as.integer(substr(FECHA_FALLECIMIENTO, 1, 4)),
+         month = as.integer(substr(FECHA_FALLECIMIENTO, 5, 6)),
+         ubigeo = as.numeric(UBIGEO),
+         age = EDAD_DECLARADA) %>% 
+  filter(!is.na(ubigeo))
+
+covid_deaths_ubigeo <- covid_deaths %>% 
+  group_by(ubigeo) %>% 
+  summarise(covid_deaths_2020_1 = sum(year==2020 & month <=3),
+            covid_deaths_2020_2 = sum(year==2020 & month >3 & month<=6),
+            covid_deaths_2020_3 = sum(year==2020 & month >6 & month<=9),
+            covid_deaths_2020_4 = sum(year==2020 & month >9),
+            covid_deaths_2021_1 = sum(year==2021 & month <=3),
+            covid_deaths_2021_2 = sum(year==2021 & month >3 & month<=6),
+            covid_deaths_2021_3 = sum(year==2021 & month >6 & month<=9),
+            covid_deaths_2021_4 = sum(year==2021 & month >9),
+            covid_deaths = n())
+head(covid_deaths)
+
+total_deaths <- as.numeric(sum(covid_deaths$covid_deaths))
+print(total_deaths)
+
+timeline_covid <- covid_deaths %>% 
+  group_by(year,month) %>% 
+  summarise(covid_deaths = n())
+  
+```
+
+
+## Distric population in 2021 (Estimation by the INEI)
+https://www.datosabiertos.gob.pe/dataset/población-peru
+
+Minedu uses ubigeo_inei
+Minsa uses ubigeo_inei
+
+```{r}
+peru_population <- read.csv("TB_POBLACION_INEI.csv",sep = ",") %>% 
+  as.data.frame() %>% 
+  mutate(ubigeo = ubigeo_inei) %>% 
+  group_by(ubigeo) %>% 
+  summarise(population = sum(Cantidad))
+head(peru_population)
+
+sum(peru_population$population)
+```
+
+
+## Compromisos de Desempeño (CdD) results
+CdD are evaluated in phases, each phase has an evaluation date.
+Also we need to keep only the results of UGEL using the type of entity column, but keeping the Regional Office of Callao (DRE CALLAO), because it functions as another UGEL.
+
+```{r}
+#The source of the phases dates comes from the legal documents and directives on the web page
+phases_cdd <- read_excel("cdd_phase_date.xlsx") %>% 
+  as.data.frame()
+
+#Results as available on the web page (validation made in-house by the team)
+cdd_results <-  read.csv("resultados_hist_cdd.csv") %>% 
+  as.data.frame() %>% 
+  filter(tipo_entidad == "UGEL EJECUTORA" | tipo_entidad =="UGEL OPERATIVA" | iged =="DRE CALLAO")
+cdd_results <- merge(cdd_results,phases_cdd,by = c("periodo","tramo"))
+head(cdd_results)
+
+```
+
+## Timeline of covid and CdD
+```{r}
+timeline_cdd <- cdd_results %>% 
+  filter(periodo > 2019) %>% 
+  mutate(year = periodo,
+         month = mes_corte) %>% 
+  group_by(year,month) %>% 
+  summarise(mean_vl = mean(valor_logrado_ufd,na.rm = T))
+head(timeline_cdd)
+  
+#Timeline
+timeline <- merge(timeline_covid, timeline_cdd, by = c("year","month"),all = T) %>% 
+  add_row(year = 2020, month = 2) %>% 
+  mutate(date = ymd(paste(year, month, "01", sep = "-")),
+         mean_vl = ifelse(is.na(mean_vl),0,mean_vl),
+         covid_deaths = ifelse(is.na(covid_deaths),0,covid_deaths))
+head(timeline)
+
+timelinechart <- ggplot(timeline, aes(x = date)) +
+  geom_line(aes(y = covid_deaths, color = "covid_deaths")) +
+  geom_bar(aes(y = mean_vl * max(covid_deaths), fill = "mean_vl"), stat = "identity", alpha = 0.5) +
+  scale_y_continuous(name = "covid_deaths", limits = c(0, 25000), sec.axis = sec_axis(~./max(timeline$mean_vl), name = "mean_vl"), labels = scales::comma) +
+  labs(x = "Date", title = "Covid Deaths and CdD results") +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  geom_text(data = subset(timeline, mean_vl > 0),
+            aes(y = mean_vl * max(covid_deaths), label = paste0(scales::percent(mean_vl, accuracy = 0.1))),
+            hjust = -0.1, size = 3, color = "black")
+timelinechart
+  
+```
+
+Hits in UGELs performance on the CdD indicators coincide with the Covid-19 waves in Peru. The first Covid-19 case in Peru was reported in March 2020, by this time, Minedu had already evaluated 8 indicators in the phase 1 of the CdD 2020. This event, gives us the possibility to see how the UGELs would have performed on normal conditions. The Pandemic hit Peru particularly hard in the 2nd and 3rd quarters of 2020, and then again in the 1st and 2nd quarters of 2021.
+
+We want to analyze how these tough quarters affected the performance of UGELs, measured as achievement value.
+* Correlation of the mean achievement value (phases 2 and 3 of 2020) vs Covid-19 related deaths (quarters 2 and 3 of 2020).
+* Correlation of the mean achievement value (phases 1 and 2 of 2021) Covid-19 related  deaths (quarters 1 and 2 of 2021).
+* Covid hit: Correlation and linear regression of (phase 1 2020 - mean vachievement value of phases 2 and 3) vs Covid-19 related  deaths (quarters 2 and 3 of 2020).
+
+
+
+## Covid deaths in each UGEL jurisdiction, by 1,000 inhabitants
+* covid_deaths
+* peru_population
+* ubigeo_codooii
+
+```{r}
+#First We have to merge all three dataframes by ubigeo
+df_list <- list(covid_deaths_ubigeo, peru_population, ubigeo_codooii)
+covid_deaths_pops <- df_list %>% reduce(full_join, by="ubigeo")
+
+#Now we need to calculate how many Covid-19 related death occurred in every UGEL jurisdiction, as well as the population of each jurisdiction
+# Also we want to analyze covid deaths relative to jurisdiction population. I chose covid deaths per 1k inhabitants.
+covid_deaths_ugel <- covid_deaths_pops %>% 
+  group_by(codooii) %>% 
+  summarise(covid_deaths_2020_1 = 1000*sum(covid_deaths_2020_1,na.rm = T)/sum(population),
+            covid_deaths_2020_2 = 1000*sum(covid_deaths_2020_2,na.rm = T)/sum(population),
+            covid_deaths_2020_3 = 1000*sum(covid_deaths_2020_3,na.rm = T)/sum(population),
+            covid_deaths_2020_4 = 1000*sum(covid_deaths_2020_4,na.rm = T)/sum(population),
+            covid_deaths_2021_1 = 1000*sum(covid_deaths_2021_1,na.rm = T)/sum(population),
+            covid_deaths_2021_2 = 1000*sum(covid_deaths_2021_2,na.rm = T)/sum(population),
+            covid_deaths_2021_3 = 1000*sum(covid_deaths_2021_3,na.rm = T)/sum(population),
+            covid_deaths_2021_4 = 1000*sum(covid_deaths_2021_4,na.rm = T)/sum(population),
+            covid_deaths = sum(covid_deaths,na.rm = T),
+            population = sum(population))
+
+head(covid_deaths_ugel)
+
+
+
+```
+
+CdD data collapsed at the UGEL level (change over year)
+Merge ugel_vars + covid_deaths_ugel + cdd_results
+Data needed:
+* Mean achievement value by year and phase from 2020 to 2021
+* Identify common indicators between 2019 - 2021
+
+```{r}
+# Mean achievement value by year and phase from 2020 to 2021
+cdd_results_ugel <- cdd_results %>% 
+  filter(periodo == 2020 | periodo == 2021) %>% 
+  group_by(codooii) %>% 
+  summarise(ugel = first(iged),
+            region = first(region),
+            vl_2020_1 = mean(valor_logrado_ufd[periodo==2020 & tramo==1],na.rm = T),
+            vl_2020_2 = mean(valor_logrado_ufd[periodo==2020 & tramo==2],na.rm = T),
+            vl_2020_2_3 = mean(valor_logrado_ufd[periodo==2020 & (tramo==2 | tramo==3)],na.rm = T),
+            vl_2020_4 = mean(valor_logrado_ufd[periodo==2020 & tramo==4],na.rm = T),
+            vl_2021_1_2 = mean(valor_logrado_ufd[periodo==2021 & (tramo==1 | tramo==2)],na.rm = T),
+            vl_2021_3 = mean(valor_logrado_ufd[periodo==2021 & tramo==3],na.rm = T))
+head(cdd_results_ugel)
+
+```
+
+
+
+
+#Analysis
+
+```{r}
+#Dataframe
+head(cdd_results_ugel)
+head(covid_deaths_ugel)
+head(ugel_vars)
+
+#We need to merge these three dataframes by codooii
+df_list2 <- list(cdd_results_ugel, covid_deaths_ugel, ugel_vars)
+analysis_df <- df_list2 %>% reduce(full_join, by="codooii")
+head(analysis_df)
+```
+
+###Correlation: mean achievement value (phases 2 and 3 of CdD 2020) vs Covid-19 related deaths (quarters 2 and 3 of 2020).
+Minedu evaluated 17 indicators in phases 2 and 3 of CdD 2020.
+
+Based on the results, it is apparent that during the first wave of Covid-19 in Peru, there was a strong correlation between the number of Covid-19 related deaths relative to the population of each jurisdiction, and the performance of the UGELs on the CdD Program of Minedu. This means that in jurisdictions that were hit harder by the pandemic, the performance of the UGELs was significantly lower. This could be due to a variety of factors, such as increased pressure on UGELs to respond to the pandemic, including adapting to remote learning models and ensuring the safety of students and staff, as well as dealing with the social and economic consequences of the pandemic.
+
+It's important to note that this correlation may not necessarily imply causation. Other factors, such as limited human capital in rural areas of the country and geographic challenges, may also have contributed to the variation in UGEL performance. Nonetheless, the correlation does suggest that the pandemic had a significant impact on the performance of UGELs in Peru.
+
+```{r}
+#2020 subset
+df_2020 <- analysis_df %>% 
+  mutate(covid_deaths_2020_2_3 = covid_deaths_2020_2 + covid_deaths_2020_3) %>% 
+  filter(!is.na(vl_2020_2_3)) %>% 
+  select(vl_2020_2_3,covid_deaths_2020_2_3)
+
+#Correlation test
+cor(df_2020)
+cor_2020 <- cor.test(df_2020$covid_deaths_2020_2_3, df_2020$vl_2020_2_3)
+cor_2020$estimate  # correlation coefficient
+cor_2020$p.value # p-value
+
+#Visualization
+corr_2020_chart <- df_2020 %>% 
+  ggplot(aes(x = covid_deaths_2020_2_3,y=vl_2020_2_3)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Covid Deaths per 1k People - Q2 and Q3 of 2020", 
+       y = "CdD Results for Phases 2-3 of 2020", 
+       title = "Correlation between Covid Deaths and UGEL Performance", subtitle = "Mid 2020") +
+  annotate("text", x = Inf, y = Inf, label = paste0("Correlation Coefficient: ", cor_2020$estimate), hjust = 1, vjust = 1) +
+  theme_minimal()
+corr_2020_chart
+
+```
+
+
+###Correlation: mean achievement value (phases 1 and 2 of 2021) covid deaths (quarters 1 and 2 of 2021).
+Minedu evaluated 13 indicators in phases 1 and 2 of CdD 2021.
+
+Based on the information provided, it seems that the second wave of Covid-19 related deaths in Peru may not be significantly correlated with UGEL performance, as the p-value is higher than .25. This could be an indication that institutions have become better adapted to the pandemic after a year of experience, and other factors may be contributing to the performance hit.
+
+```{r}
+#2021 subset
+df_2021 <- analysis_df %>% 
+  mutate(covid_deaths_2021_1_2 = covid_deaths_2021_1 + covid_deaths_2021_2) %>% 
+  filter(!is.na(vl_2021_1_2)) %>% 
+  select(vl_2021_1_2,covid_deaths_2021_1_2)
+
+#Correlation test
+cor(df_2021)
+cor_2021 <- cor.test(df_2021$covid_deaths_2021_1_2, df_2021$vl_2021_1_2)
+cor_2021$estimate  # correlation coefficient
+cor_2021$p.value # p-value
+
+#Visualization
+corr_2021_chart <- df_2021 %>% 
+  ggplot(aes(x = covid_deaths_2021_1_2,y=vl_2021_1_2)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Covid Deaths per 1k People - Q1 and Q2 of 2021", 
+       y = "CdD Results for Phases 1-2 of 2021", 
+       title = "Correlation between Covid Deaths and UGEL Performance", subtitle = "Early 2021") +
+  annotate("text", x = Inf, y = Inf, label = paste0("Correlation Coefficient: ", cor_2021$estimate), hjust = 1, vjust = 1) +
+  theme_minimal()
+corr_2021_chart
+
+```
+
+###Covid hit: Correlation of Performance hit (mean achievement value during phases 2 and 3 of 2020 minus mean achievement value in phase 1) vs covid deaths (quarters 2 and 3 of 2020).
+
+Based on the analysis conducted, it appears that there was a correlation between the impact of Covid-19 on each jurisdiction and the reduced performance of the UGELs in those jurisdictions during the first wave of the pandemic.
+
+```{r}
+#2021 subset
+df_2020_hit <- analysis_df %>% 
+  mutate(covid_deaths_2020_2_3 = covid_deaths_2020_2 + covid_deaths_2020_3,
+         vl_2020_dif =  vl_2020_2_3 - vl_2020_1) %>% 
+  filter(!is.na(vl_2020_dif)) %>% 
+  select(vl_2020_dif,covid_deaths_2020_2_3)
+
+#Correlation test
+cor(df_2020_hit)
+cor_2020_hit <- cor.test(df_2020_hit$covid_deaths_2020_2_3, df_2020_hit$vl_2020_dif)
+cor_2020_hit$estimate  # correlation coefficient
+cor_2020_hit$p.value # p-value
+
+#Visualization
+corr_2020hit_chart <- df_2020_hit %>% 
+  ggplot(aes(x = covid_deaths_2020_2_3,y=vl_2020_dif)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Covid Deaths per 1k People - Q2 and Q3 of 2020", 
+       y = "Hit in CdD Results - From P1 to P2-3 of 2020", 
+       title = "Correlation between Covid Deaths and UGEL Performance Change", subtitle = "Mid 2020") +
+  annotate("text", x = Inf, y = Inf, label = paste0("Correlation Coefficient: ", cor_2020_hit$estimate), hjust = 1, vjust = 1) +
+  theme_minimal()
+corr_2020hit_chart
+```
+
+### Linear regressions
+Linear regressions are a powerful statistical tool that can help analyze the impact of other factors, other than Covid-19, that affected UGELs performance on the CdD program. By using regression models, we can estimate the relationships between different variables in different jurisdictions. This approach can provide a more comprehensive analysis of the underlying factors that influenced institutional performance during the pandemic.
+
+In order to estimate the performance of UGELs using linear regression models, we included several variables in the analysis. Besides Covid-19 related deaths, which were measured relative to the population in each quarter, we also considered the number of students in each jurisdiction, the degree of rurality, the number of schools, the mean elevation, and the percentage of schools located in the Andes or in the rain forest. By analyzing the impact of these different factors, we can better understand how they have influenced the performance of UGELs during the pandemic. However, only few factors had an effect on UGELs performance, here's a brief overview of the analysis.
+
+In the first model, we can observe that Covid-19 related deaths had a significant impact on UGELs performance during the first wave in 2020, but the effect was reduced during the third quarter of that year. Additionally, the number of students had a significant impact on CdD results, probably due to the institutional stress caused by a higher population.
+
+In the second model, we found that the impact of Covid-19 on UGELs performance during the second wave in Peru was not as significant as during the first wave in 2020. However, the model revealed some interesting and somewhat contradictory results, as it showed that Covid-19 related deaths in the 2nd quarter and rurality had a positive impact on UGELs performance. One possible explanation could be that urban areas had multiple lockdowns mandates enforced by the government relative and that could have hinder the results of the UGELs. However it is important to conduct more research to fully understand the underlying factors contributing to these results.
+
+Finally, the third model may indicate that, although this analysis may be headed on the right path, further analysis may be needed to finally understand how Covid-19 effected UGELs performance. None of the variables selected explain the reduction in achievement value between phase 1 of the CdD 2020 and phases 2 and 3 of the same year.
+
+
+```{r}
+head(analysis_df)
+
+#First pandemic wave: 2020
+model_2020 <- lm(vl_2020_2_3 ~ covid_deaths_2020_2 + covid_deaths_2020_3 + n_students + rurality, 
+                 data = analysis_df)
+
+
+#Second pandemic wave: 2021
+model_2021 <- lm(vl_2021_1_2 ~ covid_deaths_2021_1 + covid_deaths_2021_2 + n_students + rurality,  
+                 data = analysis_df)
+
+#First pandemic hit on performance
+df_2020_hit_full <- analysis_df %>% 
+  mutate(vl_2020_dif =  vl_2020_2_3 - vl_2020_1)
+model_2020_hit <- lm(vl_2020_dif ~ covid_deaths_2020_2 + covid_deaths_2020_3 + n_students + rurality, 
+                 data = df_2020_hit_full)
+
+
+#Models summary
+summary(model_2020)
+summary(model_2021)
+summary(model_2020_hit)
+```
+
+# Consclusions and recommendations
+
+In conclusion, our research highlights the significant impact that the first wave of Covid-19 had on UGELs performance in Peru in 2020, particularly in areas that were hit harder by the pandemic. However, our analysis of the second wave in 2021 suggests that institutions may have adapted to the pandemic, and that there may have been underlying factors contributing to performance reduction.
+
+While our findings provide some insights into the effects of Covid-19 on UGELs performance, more research is needed to fully understand the underlying factors contributing to these changes. Further research could include exploring individual indicators evaluated during 2019, 2020, and 2021 to identify trends related to Covid-19 impact on UGELs performance, and incorporating other variables into the linear regression models, such as health access and income in the jurisdiction.
+
+
+# Exports
+
+```{r}
+
+export_sheets <- list("Timeline" = timeline, "Results dataframe"= analysis_df, "Covid data - UGEL" = covid_deaths_ugel)
+openxlsx::write.xlsx(export_sheets, file = "Analysis Results.xlsx") 
+```
+
+
