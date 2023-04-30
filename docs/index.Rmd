@@ -72,7 +72,7 @@ rColors <- c("#9fafa4","#516875","#f3c09c","#94918f","#9adbae","#3d4246")
 Education Census of 2020.
 https://escale.minedu.gob.pe/uee/-/document_library_display/GMv7/view/6226837
 
-```{r echo=FALSE, message=FALSE, warning=FALSE}
+```{r echo=TRUE, message=FALSE, warning=FALSE}
 #Importing the data from the link as an Excel because there were some character barriers using the DBF format 
 setwd(f_base)
 peru_schools_full_df <- read_excel("padron.xlsx") %>% 
