@@ -169,7 +169,7 @@ ggsave("schools_chart.png", plot = schools_chart, width = 8, height = 5, dpi = 3
 We will use the additional module of the Censo Educativo to collect the number of students enrolled in each school district.
 Additionally, I used the Education Census to construct more variables to better characterize each UGEL.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 #Number of students
 setwd(f_base)
 students <- read.dbf("Matricula_01.dbf", as.is = TRUE) %>% 
@@ -228,7 +228,7 @@ ggsave("peru_map.png", plot = peru_map, width = 8, height = 5, dpi = 300)
 
 The CdD program is evaluated in phases, with each phase having a specific evaluation date. We will only consider results from UGELs based on the "type of entity" column, excluding the Regional Office of Callao (DRE CALLAO) as it functions as another UGEL. The CdD indicators are scored on a scale of 0% to 100%, assessing key processes within the education sector such as book distribution to schools, coverage of teacher and principal positions, retention of students, completion rates for teacher programs and courses, and infrastructure diagnosis by UGELs.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 #The source of the phases dates comes from the legal documents and directives on the web page
 setwd(f_base)
 phases_cdd <- read_excel("cdd_phase_date.xlsx") %>% 
@@ -277,7 +277,7 @@ ggsave("cdd_historical_chart.png", plot = cdd_historical_chart, width = 8, heigh
 https://www.datosabiertos.gob.pe/dataset/fallecidos-por-covid-19-ministerio-de-salud-minsa
 I'm going to group covid deaths by quarter and year for simplicity in the analysis.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 setwd(f_base)
 covid_deaths <- read.csv("fallecidos_covid.csv",sep = ";") %>% 
   as.data.frame() %>% 
@@ -340,16 +340,15 @@ covid_deaths_ubigeo <- covid_deaths %>%
             covid_deaths_2021_4 = sum(year==2021 & month >9),
             covid_deaths = n())
 
-total_deaths <- as.numeric(sum(covid_deaths$covid_deaths))
-print(total_deaths)
-
+total_deaths <- as.numeric(sum(timeline_covid_data$covid_deaths))
+print(paste0("Covid-19 related deaths in Peru: ",total_deaths))
 ```
 
 
 
 Timeline of Covid and UGELs performance
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 timeline_cdd <- cdd_results %>% 
   filter(year > 2019) %>% 
   mutate(month = mes_corte) %>% 
@@ -406,7 +405,7 @@ I will analyze how these tough quarters for Peru, in regards of Covid-19 impact,
 I used data from INEI (Equivalent to a Census Bureau in Peru) to collect estimated data of the population. This way, I can express the Covid-19 related deaths relative to each jurisdiction population.
 
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 setwd(f_base)
 #Population in Peru
 peru_population <- read.csv("TB_POBLACION_INEI.csv",sep = ",") %>% 
@@ -473,7 +472,7 @@ Based on the results, it is apparent that during the first wave of Covid-19 in P
 
 It's important to note that this correlation may not necessarily imply causation. Other factors, such as limited human capital in rural areas of the country and geographic challenges, may also have contributed to the variation in UGEL performance. Nonetheless, the correlation does suggest that the pandemic had a significant impact on the performance of UGELs in Peru.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 #2020 subset
 df_2020 <- analysis_df %>% 
   mutate(covid_deaths_2020_2_3 = covid_deaths_2020_2 + covid_deaths_2020_3) %>% 
@@ -483,8 +482,7 @@ df_2020 <- analysis_df %>%
 #Correlation test
 cor(df_2020)
 cor_2020 <- cor.test(df_2020$covid_deaths_2020_2_3, df_2020$vl_2020_2_3)
-cor_2020$estimate  # correlation coefficient
-cor_2020$p.value # p-value
+
 
 #Visualization
 corr_2020_chart <- df_2020 %>% 
@@ -511,7 +509,7 @@ ggsave("corr_2020_chart.png", plot = corr_2020_chart, width = 8, height = 5, dpi
 
 Based on the data analyzed, it seems that the second wave of Covid-19 related deaths in Peru may not be significantly correlated with UGEL performance, as the p-value is higher than .25. This could be an indication that institutions have become better adapted to the pandemic after a year of experience, and other factors may be contributing to the performance hit.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 #2021 subset
 df_2021 <- analysis_df %>% 
   mutate(covid_deaths_2021_1_2 = covid_deaths_2021_1 + covid_deaths_2021_2) %>% 
@@ -521,8 +519,7 @@ df_2021 <- analysis_df %>%
 #Correlation test
 cor(df_2021)
 cor_2021 <- cor.test(df_2021$covid_deaths_2021_1_2, df_2021$vl_2021_1_2)
-cor_2021$estimate  # correlation coefficient
-cor_2021$p.value # p-value
+
 
 #Visualization
 corr_2021_chart <- df_2021 %>% 
@@ -548,7 +545,7 @@ ggsave("corr_2021_chart.png", plot = corr_2021_chart, width = 8, height = 5, dpi
 
 Based on the analysis conducted, it appears that there was a correlation between the impact of Covid-19 on each jurisdiction and the reduced performance of the UGELs in those jurisdictions during the first wave of the pandemic. Although, this correlation seems to be less evident in this case, and there might be other factors in play.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 #2021 subset
 df_2020_hit <- analysis_df %>% 
   mutate(covid_deaths_2020_2_3 = covid_deaths_2020_2 + covid_deaths_2020_3,
@@ -559,8 +556,7 @@ df_2020_hit <- analysis_df %>%
 #Correlation test
 cor(df_2020_hit)
 cor_2020_hit <- cor.test(df_2020_hit$covid_deaths_2020_2_3, df_2020_hit$vl_2020_dif)
-cor_2020_hit$estimate  # correlation coefficient
-cor_2020_hit$p.value # p-value
+
 
 #Visualization
 corr_2020hit_chart <- df_2020_hit %>% 
@@ -596,7 +592,7 @@ In the second model, we found that the impact of Covid-19 on UGELs performance d
 Finally, the third model may indicate that, although this analysis may be headed on the right path, further analysis may be needed to finally understand how Covid-19 effected UGELs performance. None of the variables selected explain the reduction in achievement value between phase 1 of the CdD 2020 and phases 2 and 3 of the same year.
 
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 head(analysis_df)
 analysis_df_scaled <- analysis_df %>% 
   select(-c(ugel,region)) %>% 
